@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PARA Tracker</title>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<div x-data="app()" x-init="init()">
+    <!-- Header -->
+    <header class="app-header">
+        <h1>
+            <span>📋 PARA Tracker</span>
+            <span class="status-dot" :style="'background:' + (status.ticktick ? '#10b981' : '#ef4444')"
+                  :title="status.ticktick ? 'TickTick 已连接' : 'TickTick 未连接'"></span>
+            <span class="status-dot" :style="'background:' + (status.flomo ? '#10b981' : '#ef4444')"
+                  :title="status.flomo ? 'Flomo 已连接' : 'Flomo 未连接'"></span>
+        </h1>
+        <div class="flex items-center gap-3">
+            <button class="btn btn-sm btn-secondary" @click="syncData()" :disabled="syncing">
+                <span x-text="syncing ? '同步中...' : '🔄 同步'"></span>
+            </button>
+            <button class="btn btn-sm btn-secondary" @click="currentTab = 'settings'">⚙️</button>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- Nav Tabs -->
+        <div class="nav-tabs">
+            <button class="nav-tab" :class="{ active: currentTab === 'dashboard' }"
+                    @click="currentTab = 'dashboard'">📊 概览</button>
+            <button class="nav-tab" :class="{ active: currentTab === 'tasks' }"
+                    @click="currentTab = 'tasks'">✅ 任务</button>
+            <button class="nav-tab" :class="{ active: currentTab === 'memos' }"
+                    @click="currentTab = 'memos'">📝 笔记</button>
+            <button class="nav-tab" :class="{ active: currentTab === 'para' }"
+                    @click="currentTab = 'para'">🏷️ PARA</button>
+            <button class="nav-tab" :class="{ active: currentTab === 'ai' }"
+                    @click="currentTab = 'ai'">🤖 AI 摘要</button>
+            <button class="nav-tab" :class="{ active: currentTab === 'settings' }"
+                    @click="currentTab = 'settings'">🔧 设置</button>
+        </div>
+
+        <!-- ====== DASHBOARD ====== -->
+        <div x-show="currentTab === 'dashboard'" x-cloak>
+            <!-- 快速操作 -->
+            <div class="flex gap-3 mb-4">
+                <button class="btn btn-primary" @click="openFreeNote()">✏️ 记笔记</button>
+                <button class="btn btn-secondary" @click="currentTab = 'tasks'">📋 看任务</button>
+            </div>
+
+            <!-- 今日完成任务 -->
+            <div class="card">
+                <h3 class="font-bold mb-3">✅ 今日完成</h3>
+                <template x-if="todayCompleted.length === 0">
+                    <div class="empty-state"><p>今天还没有完成任务</p></div>
+                </template>
+                <template x-for="t in todayCompleted" :key="t.id">
+                    <div class="task-item">
+                        <span class="task-checkbox done"></span>
+                        <div class="task-content">
+                            <div class="task-title done" x-text="t.title"></div>
+                            <div class="task-meta">
+                                <span x-text="formatTime(t.completed_at)"></span>
+                                <template x-for="tag in (t.tags || [])" :key="tag">
+                                    <span class="tag" :class="'tag-' + tagColor(tag)" x-text="tag"></span>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+            </div>
+
+            <!-- 待办任务概览 -->
+            <div class="card">
+                <div class="flex justify-between items-center mb-3">
+                    <h3 class="font-bold">⏳ 待办任务</h3>
+                    <span class="text-sm text-secondary" x-text="pendingTasks.length + ' 项'"></span>
+                </div>
+                <template x-if="pendingTasks.length === 0">
+                    <div class="empty-state"><p>暂无待办任务 🎉</p></div>
+                </template>
+                <template x-for="t in pendingTasks.slice(0, 8)" :key="t.id">
+                    <div class="task-item">
+                        <button class="task-checkbox" @click="toggleTask(t)"></button>
+                        <div class="task-content">
+                            <div class="task-title" x-text="t.title"></div>
+                            <div class="task-meta">
+                                <span x-show="t.priority > 0"
+                                      class="task-priority"
+                                      :class="'priority-' + (t.priority >= 5 ? 'high' : t.priority >= 3 ? 'medium' : 'low')"
+                                      x-text="t.priority >= 5 ? '高' : t.priority >= 3 ? '中' : '低'"></span>
+                                <span x-show="t.due_date" x-text="'截止: ' + formatDate(t.due_date)"></span>
+                                <template x-for="tag in (t.tags || [])" :key="tag">
+                                    <span class="tag" :class="'tag-' + tagColor(tag)" x-text="tag"></span>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+            </div>
+
+            <!-- 最近笔记 -->
+            <div class="card">
+                <h3 class="font-bold mb-3">📝 最近笔记</h3>
+                <template x-if="recentMemos.length === 0">
+                    <div class="empty-state"><p>暂无笔记</p></div>
+                </template>
+                <template x-for="m in recentMemos" :key="m.id">
+                    <div class="memo-item">
+                        <div class="memo-content text-sm" x-text="m.content.slice(0, 150)"></div>
+                        <div class="flex gap-2 items-center">
+                            <span class="memo-source" x-text="m.source === 'task_completion' ? '任务完成' : '自由记录'"></span>
+                            <template x-for="tag in (m.tags || [])" :key="tag">
+                                <span class="tag" :class="'tag-' + tagColor(tag)" x-text="tag"></span>
+                            </template>
+                            <span class="text-sm text-secondary" x-text="formatTime(m.created_at)"></span>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+        <!-- ====== TASKS ====== -->
+        <div x-show="currentTab === 'tasks'" x-cloak>
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="font-bold text-lg">✅ 任务列表</h2>
+                <div class="flex gap-2">
+                    <button class="btn btn-primary btn-sm" @click="openNewTask()">+ 新建任务</button>
+                    <select x-model="taskFilter" @change="loadTasks()" style="width:auto;">
+                        <option value="all">全部</option>
+                        <option value="todo">待办</option>
+                        <option value="done">已完成</option>
+                    </select>
+                </div>
+            </div>
+
+            <template x-if="tasks.length === 0">
+                <div class="card">
+                    <div class="empty-state"><p>暂无任务，请先同步或连接 TickTick</p></div>
+                </div>
+            </template>
+            <template x-for="(taskList, cat) in groupedTasks" :key="cat">
+                <template x-if="taskList.length > 0">
+                    <div class="card mb-4">
+                        <h3 class="font-bold mb-3" :style="'color:' + categoryColor(cat)" x-text="cat"></h3>
+                        <template x-for="t in taskList" :key="t.id">
+                            <div class="task-item">
+                                <button class="task-checkbox"
+                                        :class="{ done: t.status === 'done' }"
+                                        @click="toggleTask(t)"></button>
+                                <div class="task-content" style="cursor:pointer;" @click="openEditTask(t)">
+                                    <div class="task-title" :class="{ done: t.status === 'done' }" x-text="t.title"></div>
+                                    <div class="task-meta">
+                                        <span x-show="t.priority > 0"
+                                              class="task-priority"
+                                              :class="'priority-' + (t.priority >= 5 ? 'high' : t.priority >= 3 ? 'medium' : 'low')"
+                                              x-text="t.priority >= 5 ? '高' : t.priority >= 3 ? '中' : '低'"></span>
+                                        <span x-show="t.due_date" x-text="'截止: ' + formatDate(t.due_date)"></span>
+                                        <template x-for="tag in (t.tags || [])" :key="tag">
+                                            <span class="tag" :class="'tag-' + tagColor(tag)" x-text="tag"></span>
+                                        </template>
+                                    </div>
+                                </div>
+                                <button class="btn btn-sm btn-secondary" @click.stop="openEditTask(t)" title="编辑"
+                                        style="padding:0.2rem 0.5rem; font-size:0.8rem;">✎</button>
+                                <button class="btn btn-sm btn-secondary" @click.stop="deleteTask(t)" title="删除"
+                                        style="padding:0.2rem 0.5rem; font-size:0.8rem; color:#ef4444;">✕</button>
+                            </div>
+                        </template>
+                    </div>
+                </template>
+            </template>
+        </div>
+
+        <!-- ====== MEMOS ====== -->
+        <div x-show="currentTab === 'memos'" x-cloak>
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="font-bold text-lg">📝 笔记</h2>
+                <button class="btn btn-primary" @click="openFreeNote()">✏️ 写笔记</button>
+            </div>
+
+            <template x-if="memos.length === 0">
+                <div class="card">
+                    <div class="empty-state"><p>暂无笔记</p></div>
+                </div>
+            </template>
+            <template x-for="(memoList, cat) in groupedMemos" :key="cat">
+                <template x-if="memoList.length > 0">
+                    <div class="card mb-4">
+                        <h3 class="font-bold mb-3" :style="'color:' + categoryColor(cat)" x-text="cat"></h3>
+                        <template x-for="m in memoList" :key="m.id">
+                            <div class="memo-item">
+                                <div class="memo-content" x-text="m.content"></div>
+                                <div class="flex gap-2 items-center mt-2">
+                                    <span class="memo-source" x-text="m.source === 'task_completion' ? '📌 任务完成' : '✏️ 自由记录'"></span>
+                                    <template x-for="tag in (m.tags || [])" :key="tag">
+                                        <span class="tag" :class="'tag-' + tagColor(tag)" x-text="tag"></span>
+                                    </template>
+                                    <span class="text-sm text-secondary" x-text="formatTime(m.created_at)"></span>
+                                    <button class="btn btn-sm btn-secondary" @click="openEditMemo(m)" title="编辑"
+                                            style="padding:0.2rem 0.5rem; font-size:0.8rem;">✎</button>
+                                    <button class="btn btn-sm btn-secondary" @click="deleteMemo(m)" title="删除"
+                                            style="padding:0.2rem 0.5rem; font-size:0.8rem; color:#ef4444;">✕</button>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </template>
+            </template>
+        </div>
+
+        <!-- ====== PARA TAGS ====== -->
+        <div x-show="currentTab === 'para'" x-cloak>
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="font-bold text-lg">🏷️ PARA 标签管理</h2>
+                <button class="btn btn-sm btn-primary" @click="showAddParaTag = true">+ 新建标签</button>
+            </div>
+
+            <div class="card">
+                <div class="para-tree">
+                    <template x-for="cat in paraTree" :key="cat.id">
+                        <div>
+                            <div class="para-category">
+                                <span :style="'color:' + categoryColor(cat.category)" x-text="cat.full_path"></span>
+                                <span class="text-sm text-secondary" x-text="cat.label"></span>
+                            </div>
+                            <div class="para-children" x-show="cat.children.length > 0">
+                                <template x-for="child in cat.children" :key="child.id">
+                                    <div class="para-child flex justify-between">
+                                        <span>
+                                            <span class="tag" :class="'tag-' + tagColor(child.full_path)" x-text="child.full_path"></span>
+                                            <span class="text-sm text-secondary" x-text="child.label"></span>
+                                        </span>
+                                        <span class="flex gap-1">
+                                            <button class="btn btn-sm btn-secondary" @click="openEditParaTag(child)" title="编辑"
+                                                    style="padding:0.1rem 0.4rem; font-size:0.75rem;">✎</button>
+                                            <button class="btn btn-sm btn-secondary" @click="deleteParaTag(child.id)">✕</button>
+                                        </span>
+                                    </div>
+                                </template>
+                                <template x-if="cat.children.length === 0">
+                                    <div class="text-sm text-secondary" style="padding: 0.3rem 0.5rem;">暂无子标签</div>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <!-- 新建标签表单 -->
+            <div x-show="showAddParaTag" class="card" x-cloak>
+                <h3 class="font-bold mb-3">新建 PARA 标签</h3>
+                <div class="flex gap-3">
+                    <select x-model="newTagCategory" style="width:auto;">
+                        <option value="01-Projects">01-Projects</option>
+                        <option value="02-Areas">02-Areas</option>
+                        <option value="03-Resources">03-Resources</option>
+                        <option value="04-Archives">04-Archives</option>
+                    </select>
+                    <input type="text" x-model="newTagLabel" placeholder="标签名称" @keydown.enter="createParaTag()">
+                    <button class="btn btn-primary" @click="createParaTag()">创建</button>
+                    <button class="btn btn-secondary" @click="showAddParaTag = false">取消</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ====== EDIT PARA TAG MODAL ====== -->
+        <div x-show="showEditParaTag" class="modal-backdrop" x-cloak
+             @click.self="showEditParaTag = false">
+            <div class="modal">
+                <h2>✎ 编辑标签</h2>
+                <p class="text-sm text-secondary mb-3" x-text="editParaTagFullPath"></p>
+
+                <div class="mb-3">
+                    <label class="text-sm font-bold mb-1 block">标签名称</label>
+                    <input type="text" x-model="editParaTagLabel" placeholder="输入新名称"
+                           @keydown.enter="saveEditParaTag()">
+                </div>
+
+                <div class="flex justify-between mt-4">
+                    <button class="btn btn-secondary" @click="showEditParaTag = false">取消</button>
+                    <button class="btn btn-primary" @click="saveEditParaTag()"
+                            :disabled="!editParaTagLabel.trim()">💾 保存</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ====== AI ====== -->
+        <div x-show="currentTab === 'ai'" x-cloak>
+            <h2 class="font-bold text-lg mb-4">🤖 AI 摘要</h2>
+            <div class="card">
+                <div class="text-center" style="padding: 2rem 0; color: var(--text-secondary);">
+                    <p style="font-size: 1.2rem; margin-bottom: 0.5rem;">建设中...</p>
+                    <p class="text-sm">此功能正在开发中，敬请期待</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ====== SETTINGS ====== -->
+        <div x-show="currentTab === 'settings'" x-cloak>
+            <h2 class="font-bold text-lg mb-4">🔧 设置</h2>
+
+            <!-- TickTick -->
+            <div class="card">
+                <h3 class="font-bold mb-3">✅ TickTick 配置</h3>
+                <div class="flex items-center gap-2 mb-3">
+                    <span class="status-dot" style="width:10px;height:10px;"
+                          :style="'background:' + (status.ticktick ? '#10b981' : '#ef4444')"></span>
+                    <span x-text="status.ticktick ? '已连接' : '未连接'" class="text-sm"></span>
+                </div>
+                <div class="flex flex-col gap-2" x-show="!status.ticktick">
+                    <div class="flex gap-3">
+                        <input type="email" x-model="config.ticktick_username" placeholder="TickTick 邮箱" style="flex:1;" @keydown.enter="saveTickTick()">
+                        <input type="password" x-model="config.ticktick_password" placeholder="密码" style="flex:1;" @keydown.enter="saveTickTick()">
+                        <button class="btn btn-primary btn-sm" @click="saveTickTick()">登录</button>
+                    </div>
+                    <div class="text-sm text-secondary">使用 TickTick 账号密码直接登录（V2 Session API）</div>
+                </div>
+            </div>
+
+            <!-- Flomo -->
+            <div class="card">
+                <h3 class="font-bold mb-3">📝 Flomo 配置</h3>
+                <div class="flex items-center gap-2 mb-3">
+                    <span class="status-dot" style="width:10px;height:10px;"
+                          :style="'background:' + (status.flomo ? '#10b981' : '#ef4444')"></span>
+                    <span x-text="status.flomo ? '已连接' : '未连接'" class="text-sm"></span>
+                </div>
+                <div class="flex gap-3">
+                    <input type="text" x-model="config.flomo_api_url" placeholder="Flomo API URL (专属记录链接)"
+                           style="flex:1;" @keydown.enter="saveFlomo()">
+                    <button class="btn btn-primary btn-sm" @click="saveFlomo()">保存</button>
+                </div>
+                <div class="text-sm text-secondary mt-2">
+                    在 Flomo 设置 → API 及第三方工具 → 复制专属记录 API 链接
+                </div>
+            </div>
+
+            <!-- AI 摘要 -->
+            <div class="card">
+                <h3 class="font-bold mb-3">🤖 AI 摘要配置 (可选)</h3>
+                <div class="flex items-center gap-2 mb-3">
+                    <span class="status-dot" style="width:10px;height:10px;"
+                          :style="'background:' + (status.ai_summary ? '#10b981' : '#6b7280')"></span>
+                    <span x-text="status.ai_summary ? '已启用' : '未配置'" class="text-sm"></span>
+                </div>
+                <div class="flex gap-3">
+                    <input type="password" x-model="config.openai_api_key" placeholder="OpenAI API Key"
+                           style="flex:1;">
+                    <input type="text" x-model="config.openai_base_url" placeholder="API Base URL (可选)" style="flex:1;">
+                    <button class="btn btn-primary btn-sm" @click="saveAI()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== NEW TASK MODAL ====== -->
+    <div x-show="showNewTaskModal" class="modal-backdrop" x-cloak
+         @click.self="showNewTaskModal = false">
+        <div class="modal">
+            <h2>📋 新建任务</h2>
+
+            <div class="mb-3">
+                <label class="text-sm font-bold mb-1 block">任务标题 *</label>
+                <input type="text" x-model="newTask.title" placeholder="输入任务标题"
+                       @keydown.enter="createNewTask()">
+            </div>
+
+            <div class="flex gap-3 mb-3">
+                <div style="flex:1;">
+                    <label class="text-sm font-bold mb-1 block">优先级</label>
+                    <select x-model="newTask.priority">
+                        <option value="0">无</option>
+                        <option value="low">低</option>
+                        <option value="medium">中</option>
+                        <option value="high">高</option>
+                    </select>
+                </div>
+                <div style="flex:1;">
+                    <label class="text-sm font-bold mb-1 block">截止日期</label>
+                    <input type="date" x-model="newTask.due_date">
+                </div>
+            </div>
+
+            <div class="mb-3">
+                <label class="text-sm font-bold mb-1 block">标签</label>
+                <div class="flex gap-2 mb-1" style="position:relative;">
+                    <input type="text" x-model="newTaskTagInput" placeholder="输入标签后按回车"
+                           @keydown.enter.prevent="addNewTaskTag()"
+                           @keydown.tab.prevent="onNewTagInputKeydown($event)"
+                           @keydown.down.prevent="onNewTagInputKeydown($event)"
+                           @keydown.up.prevent="onNewTagInputKeydown($event)"
+                           @keydown.escape="onNewTagInputKeydown($event)"
+                           @input="searchParaTags(newTaskTagInput, 'newTaskTagSearchResults', 'newTaskTagSelectedIndex')"
+                           @focus="showTagSuggestions = !newTaskTagInput.trim() && recentTags.length > 0"
+                           @blur="setTimeout(() => { showTagSuggestions = false; newTaskTagSearchResults = []; }, 200)"
+                           style="flex:1;">
+                    <!-- 搜索建议 -->
+                    <div x-show="newTaskTagSearchResults.length > 0" x-cloak
+                         style="position:absolute; top:100%; left:0; right:0; z-index:10;
+                                background:white; border:1px solid var(--border); border-radius:8px;
+                                box-shadow:0 4px 12px rgba(0,0,0,0.1); margin-top:4px; max-height:180px; overflow-y:auto;">
+                        <div class="text-xs text-secondary" style="padding:6px 10px; border-bottom:1px solid var(--border);">按 Tab 选择</div>
+                        <template x-for="(tag, idx) in newTaskTagSearchResults" :key="tag">
+                            <div @mousedown="selectNewTagSuggestion(tag)"
+                                 style="padding:6px 10px; cursor:pointer; font-size:0.85rem;
+                                        transition:background 0.15s;"
+                                 :style="idx === newTaskTagSelectedIndex ? 'background:#e0e7ff;' : ''"
+                                 @mouseenter="$el.style.background='#f1f5f9'"
+                                 @mouseleave="$el.style.background=''">
+                                <span class="tag" :class="'tag-' + tagColor(tag)" x-text="tag"></span>
+                            </div>
+                        </template>
+                    </div>
+                    <!-- 最近标签建议 -->
+                    <div x-show="showTagSuggestions && recentTags.length > 0" x-cloak
+                         style="position:absolute; top:100%; left:0; right:0; z-index:10;
+                                background:white; border:1px solid var(--border); border-radius:8px;
+                                box-shadow:0 4px 12px rgba(0,0,0,0.1); margin-top:4px; max-height:180px; overflow-y:auto;">
+                        <div class="text-xs text-secondary" style="padding:6px 10px; border-bottom:1px solid var(--border);">最近使用</div>
+                        <template x-for="tag in recentTags.filter(t => !newTask.tags.includes(t))" :key="tag">
+                            <div @mousedown="selectRecentTag(tag)"
+                                 style="padding:6px 10px; cursor:pointer; font-size:0.85rem;
+                                        transition:background 0.15s;"
+                                 @mouseenter="$el.style.background='#f1f5f9'"
+                                 @mouseleave="$el.style.background=''">
+                                <span class="tag" :class="'tag-' + tagColor(tag)" x-text="tag"></span>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+                <div class="flex flex-wrap gap-1">
+                    <template x-for="tag in newTask.tags" :key="tag">
+                        <span class="tag" :class="'tag-' + tagColor(tag)" style="cursor:pointer;" @click="removeNewTaskTag(tag)">
+                            <span x-text="tag"></span> ✕
+                        </span>
+                    </template>
+                </div>
+            </div>
+
+            <div class="flex justify-between mt-4">
+                <button class="btn btn-secondary" @click="showNewTaskModal = false">取消</button>
+                <button class="btn btn-primary" @click="createNewTask()"
+                        :disabled="!newTask.title.trim()">✅ 创建</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== EDIT TASK MODAL ====== -->
+    <div x-show="showEditTaskModal" class="modal-backdrop" x-cloak
+         @click.self="showEditTaskModal = false">
+        <div class="modal">
+            <h2>✎ 编辑任务</h2>
+
+            <div class="mb-3">
+                <label class="text-sm font-bold mb-1 block">任务标题 *</label>
+                <input type="text" x-model="editTask.title" placeholder="输入任务标题">
+            </div>
+
+            <div class="mb-3">
+                <label class="text-sm font-bold mb-1 block">描述</label>
+                <textarea x-model="editTask.content" rows="3" placeholder="任务描述（可选）"></textarea>
+            </div>
+
+            <div class="flex gap-3 mb-3">
+                <div style="flex:1;">
+                    <label class="text-sm font-bold mb-1 block">优先级</label>
+                    <select x-model="editTask.priority">
+                        <option value="0">无</option>
+                        <option value="1">低</option>
+                        <option value="3">中</option>
+                        <option value="5">高</option>
+                    </select>
+                </div>
+                <div style="flex:1;">
+                    <label class="text-sm font-bold mb-1 block">截止日期</label>
+                    <input type="date" x-model="editTask.due_date">
+                </div>
+            </div>
+
+            <div class="mb-3">
+                <label class="text-sm font-bold mb-1 block">标签</label>
+                <div class="flex gap-2 mb-1" style="position:relative;">
+                    <input type="text" x-model="editTaskTagInput" placeholder="输入标签后按回车"
+                           @keydown.enter.prevent="addEditTaskTag()"
+                           @keydown.tab.prevent="onEditTagInputKeydown($event)"
+                           @keydown.down.prevent="onEditTagInputKeydown($event)"
+                           @keydown.up.prevent="onEditTagInputKeydown($event)"
+                           @keydown.escape="onEditTagInputKeydown($event)"
+                           @input="searchParaTags(editTaskTagInput, 'editTaskTagSearchResults', 'editTaskTagSelectedIndex')"
+                           @blur="setTimeout(() => { editTaskTagSearchResults = []; }, 200)"
+                           style="flex:1;">
+                    <!-- 搜索建议 -->
+                    <div x-show="editTaskTagSearchResults.length > 0" x-cloak
+                         style="position:absolute; top:100%; left:0; right:0; z-index:10;
+                                background:white; border:1px solid var(--border); border-radius:8px;
+                                box-shadow:0 4px 12px rgba(0,0,0,0.1); margin-top:4px; max-height:180px; overflow-y:auto;">
+                        <div class="text-xs text-secondary" style="padding:6px 10px; border-bottom:1px solid var(--border);">按 Tab 选择</div>
+                        <template x-for="(tag, idx) in editTaskTagSearchResults" :key="tag">
+                            <div @mousedown="selectEditTagSuggestion(tag)"
+                                 style="padding:6px 10px; cursor:pointer; font-size:0.85rem;
+                                        transition:background 0.15s;"
+                                 :style="idx === editTaskTagSelectedIndex ? 'background:#e0e7ff;' : ''"
+                                 @mouseenter="$el.style.background='#f1f5f9'"
+                                 @mouseleave="$el.style.background=''">
+                                <span class="tag" :class="'tag-' + tagColor(tag)" x-text="tag"></span>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+                <div class="flex flex-wrap gap-1">
+                    <template x-for="tag in editTask.tags" :key="tag">
+                        <span class="tag" :class="'tag-' + tagColor(tag)" style="cursor:pointer;" @click="removeEditTaskTag(tag)">
+                            <span x-text="tag"></span> ✕
+                        </span>
+                    </template>
+                </div>
+            </div>
+
+            <div class="flex justify-between mt-4">
+                <button class="btn btn-secondary" @click="showEditTaskModal = false">取消</button>
+                <button class="btn btn-primary" @click="saveEditTask()"
+                        :disabled="!editTask.title.trim()">💾 保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== NOTE MODAL (任务完成弹窗) ====== -->
+    <div x-show="showNoteModal" class="modal-backdrop" x-cloak
+         @click.self="showNoteModal = false">
+        <div class="modal">
+            <h2>✏️ 记录完成感想</h2>
+            <p class="text-sm text-secondary mb-3" x-text="'任务: ' + (completingTask?.title || '')"></p>
+
+            <!-- 建议标签 -->
+            <div class="text-sm font-bold mb-1">建议标签:</div>
+            <div class="tag-selector mb-3">
+                <template x-for="tag in suggestedTags" :key="tag">
+                    <span class="tag-option"
+                          :class="{ selected: selectedTags.includes(tag) }"
+                          @click="toggleTag(tag)" x-text="tag"></span>
+                </template>
+            </div>
+
+            <textarea x-model="noteContent" rows="6"
+                      placeholder="写下完成这个任务的感想、收获、遇到的问题..."></textarea>
+
+            <div class="flex justify-between mt-4">
+                <button class="btn btn-secondary" @click="showNoteModal = false">稍后再说</button>
+                <button class="btn btn-primary" @click="saveTaskMemo()"
+                        :disabled="!noteContent.trim()">💾 保存笔记</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== FREE NOTE MODAL ====== -->
+    <div x-show="showFreeNoteModal" class="modal-backdrop" x-cloak
+         @click.self="showFreeNoteModal = false">
+        <div class="modal">
+            <h2>✏️ 自由笔记</h2>
+
+            <div class="text-sm font-bold mb-1">选择 PARA 标签:</div>
+            <select x-model="freeNoteTag" class="mb-3">
+                <option value="">无标签</option>
+                <template x-for="cat in paraTree" :key="cat.id">
+                    <optgroup :label="cat.full_path + ' ' + cat.label">
+                        <option :value="cat.full_path" x-text="cat.full_path"></option>
+                        <template x-for="child in cat.children" :key="child.id">
+                            <option :value="child.full_path" x-text="child.full_path"></option>
+                        </template>
+                    </optgroup>
+                </template>
+            </select>
+
+            <textarea x-model="freeNoteContent" rows="6"
+                      placeholder="写下你的想法..."></textarea>
+
+            <div class="flex justify-between mt-4">
+                <button class="btn btn-secondary" @click="showFreeNoteModal = false">取消</button>
+                <button class="btn btn-primary" @click="saveFreeNote()"
+                        :disabled="!freeNoteContent.trim()">💾 保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== EDIT MEMO MODAL ====== -->
+    <div x-show="showEditMemoModal" class="modal-backdrop" x-cloak
+         @click.self="showEditMemoModal = false">
+        <div class="modal">
+            <h2>✎ 编辑笔记</h2>
+
+            <textarea x-model="editMemoContent" rows="6"
+                      placeholder="修改笔记内容..."></textarea>
+
+            <div class="mb-3 mt-3">
+                <label class="text-sm font-bold mb-1 block">标签</label>
+                <div class="flex gap-2 mb-1" style="position:relative;">
+                    <input type="text" x-model="editMemoTagInput" placeholder="输入标签后按回车"
+                           @keydown.enter.prevent="addEditMemoTag()"
+                           @keydown.tab="onEditMemoTagKeydown($event)"
+                           @keydown.down.prevent="onEditMemoTagKeydown($event)"
+                           @keydown.up.prevent="onEditMemoTagKeydown($event)"
+                           @keydown.escape.prevent="onEditMemoTagKeydown($event)"
+                           @input="searchEditMemoTags()"
+                           @blur="setTimeout(() => { editMemoTagSearchResults = []; }, 200)"
+                           style="flex:1;">
+                    <div x-show="editMemoTagSearchResults.length > 0" x-cloak
+                         style="position:absolute; top:100%; left:0; right:0; z-index:10;
+                                background:white; border:1px solid var(--border); border-radius:8px;
+                                box-shadow:0 4px 12px rgba(0,0,0,0.1); margin-top:4px; max-height:180px; overflow-y:auto;">
+                        <div class="text-xs text-secondary" style="padding:6px 10px; border-bottom:1px solid var(--border);">按 Tab 选择</div>
+                        <template x-for="(tag, idx) in editMemoTagSearchResults" :key="tag">
+                            <div @mousedown="selectEditMemoTagSuggestion(tag)"
+                                 style="padding:6px 10px; cursor:pointer; font-size:0.85rem;"
+                                 :style="idx === editMemoTagSelectedIndex ? 'background:#e0e7ff;' : ''"
+                                 @mouseenter="$el.style.background='#f1f5f9'"
+                                 @mouseleave="$el.style.background=''">
+                                <span class="tag" :class="'tag-' + tagColor(tag)" x-text="tag"></span>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+                <div class="flex flex-wrap gap-1">
+                    <template x-for="tag in editMemoTags" :key="tag">
+                        <span class="tag" :class="'tag-' + tagColor(tag)" style="cursor:pointer;" @click="removeEditMemoTag(tag)">
+                            <span x-text="tag"></span> ✕
+                        </span>
+                    </template>
+                </div>
+            </div>
+            <div class="flex justify-between mt-4">
+                <button class="btn btn-secondary" @click="showEditMemoModal = false">取消</button>
+                <button class="btn btn-primary" @click="saveEditMemo()"
+                        :disabled="!editMemoContent.trim()">💾 保存</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
