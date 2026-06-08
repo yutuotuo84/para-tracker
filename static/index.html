@@ -36,7 +36,7 @@
             <button class="nav-tab" :class="{ active: currentTab === 'memos' }"
                     @click="currentTab = 'memos'">📝 笔记</button>
             <button class="nav-tab" :class="{ active: currentTab === 'para' }"
-                    @click="currentTab = 'para'">🏷️ PARA</button>
+                    @click="currentTab = 'para'">🏷️ PARA 标签</button>
             <button class="nav-tab" :class="{ active: currentTab === 'ai' }"
                     @click="currentTab = 'ai'">🤖 AI 摘要</button>
             <button class="nav-tab" :class="{ active: currentTab === 'settings' }"
@@ -48,7 +48,7 @@
             <!-- 快速操作 -->
             <div class="flex gap-3 mb-4">
                 <button class="btn btn-primary" @click="openFreeNote()">✏️ 记笔记</button>
-                <button class="btn btn-secondary" @click="currentTab = 'tasks'">📋 看任务</button>
+                <button class="btn btn-secondary" @click="openNewTask()">📋 新建任务</button>
             </div>
 
             <!-- 今日完成任务 -->
@@ -110,7 +110,10 @@
                 </template>
                 <template x-for="m in recentMemos" :key="m.id">
                     <div class="memo-item">
-                        <div class="memo-content text-sm" x-text="m.content.slice(0, 150)"></div>
+                        <div class="memo-content">
+                            <div x-show="getMemoTitle(m.content)" class="memo-title" x-text="getMemoTitle(m.content)"></div>
+                            <div class="memo-body text-sm" x-text="getMemoBody(m.content)"></div>
+                        </div>
                         <div class="flex gap-2 items-center">
                             <span class="memo-source" x-text="m.source === 'task_completion' ? '任务完成' : '自由记录'"></span>
                             <template x-for="tag in (m.tags || [])" :key="tag">
@@ -162,12 +165,12 @@
                                         <template x-for="tag in (t.tags || [])" :key="tag">
                                             <span class="tag" :class="'tag-' + tagColor(tag)" x-text="tag"></span>
                                         </template>
+                                        <button class="btn btn-sm btn-secondary" @click.stop="openEditTask(t)" title="编辑"
+                                                style="padding:0.1rem 0.35rem; font-size:0.75rem; margin-left:0.25rem;">✎</button>
+                                        <button class="btn btn-sm btn-secondary" @click.stop="deleteTask(t)" title="删除"
+                                                style="padding:0.1rem 0.35rem; font-size:0.75rem; color:#ef4444;">✕</button>
                                     </div>
                                 </div>
-                                <button class="btn btn-sm btn-secondary" @click.stop="openEditTask(t)" title="编辑"
-                                        style="padding:0.2rem 0.5rem; font-size:0.8rem;">✎</button>
-                                <button class="btn btn-sm btn-secondary" @click.stop="deleteTask(t)" title="删除"
-                                        style="padding:0.2rem 0.5rem; font-size:0.8rem; color:#ef4444;">✕</button>
                             </div>
                         </template>
                     </div>
@@ -193,7 +196,10 @@
                         <h3 class="font-bold mb-3" :style="'color:' + categoryColor(cat)" x-text="cat"></h3>
                         <template x-for="m in memoList" :key="m.id">
                             <div class="memo-item">
-                                <div class="memo-content" x-text="m.content"></div>
+                                <div class="memo-content">
+                                    <div x-show="getMemoTitle(m.content)" class="memo-title" x-text="getMemoTitle(m.content)"></div>
+                                    <div class="memo-body" x-text="getMemoBody(m.content)"></div>
+                                </div>
                                 <div class="flex gap-2 items-center mt-2">
                                     <span class="memo-source" x-text="m.source === 'task_completion' ? '📌 任务完成' : '✏️ 自由记录'"></span>
                                     <template x-for="tag in (m.tags || [])" :key="tag">
@@ -215,7 +221,7 @@
         <!-- ====== PARA TAGS ====== -->
         <div x-show="currentTab === 'para'" x-cloak>
             <div class="flex justify-between items-center mb-4">
-                <h2 class="font-bold text-lg">🏷️ PARA 标签管理</h2>
+                <h2 class="font-bold text-lg">🏷️ PARA 标签</h2>
                 <button class="btn btn-sm btn-primary" @click="showAddParaTag = true">+ 新建标签</button>
             </div>
 

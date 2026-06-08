@@ -712,6 +712,18 @@ function app() {
             return date.toLocaleDateString('zh-CN') + ' ' + date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
         },
 
+        getMemoTitle(content) {
+            if (!content) return '';
+            const match = content.match(/^## (.+?)(?:\n|$)/);
+            return match ? match[1] : '';
+        },
+
+        getMemoBody(content) {
+            if (!content) return '';
+            const idx = content.indexOf('\n\n');
+            return idx >= 0 ? content.slice(idx + 2) : content;
+        },
+
         renderMarkdown(text) {
             if (!text) return '';
             let html = text

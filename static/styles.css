@@ -261,6 +261,8 @@ textarea:focus, input:focus { outline: none; border-color: var(--para-p); }
 
 .memo-item:last-child { border-bottom: none; }
 .memo-content { margin-bottom: 0.5rem; }
+.memo-title { font-weight: 600; font-size: 0.95rem; margin-bottom: 0.25rem; color: var(--text); }
+.memo-body { color: var(--text-secondary); font-size: 0.85rem; white-space: pre-wrap; line-height: 1.6; }
 .memo-source {
     font-size: 0.75rem;
     padding: 0.15rem 0.4rem;
