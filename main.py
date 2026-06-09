@@ -4,9 +4,9 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 
 from config import settings
 from database import init_db
@@ -69,6 +69,29 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+
+# ─── 登录验证中间件 ───
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    from routers.auth import require_auth
+
+    if settings.app_password:
+        # 不需要验证的路径
+        public_paths = {"/login", "/api/auth/login", "/api/auth/check", "/static"}
+        if not any(request.url.path.startswith(p) for p in public_paths):
+            if not require_auth(request):
+                if request.url.path.startswith("/api/"):
+                    from fastapi.responses import JSONResponse
+                    return JSONResponse(status_code=401, content={"detail": "未登录"})
+                return RedirectResponse(url="/login")
+    return await call_next(request)
+
+
+@app.get("/login")
+async def login_page():
+    """返回登录页面"""
+    return FileResponse("static/login.html")
 
 # 注册路由
 from routers import auth, tasks, memos, para, summary

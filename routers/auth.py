@@ -1,6 +1,7 @@
 """认证和同步相关 API 路由"""
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+import secrets
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +13,58 @@ from services.summary_service import summary_service
 from services.para_service import seed_para_tags
 
 router = APIRouter(prefix="/api", tags=["auth"])
+
+# 简单的内存 session 存储（单用户足够）
+_session_token: str | None = None
+
+
+def require_auth(request: Request):
+    """验证请求是否已登录（被 middleware 调用）"""
+    if not settings.app_password:
+        return True  # 未设置密码，不验证
+    token = request.cookies.get("session")
+    return token == _session_token
+
+
+class LoginRequest(BaseModel):
+    password: str
+
+
+class LoginResponse(BaseModel):
+    success: bool
+    message: str = ""
+
+
+@router.post("/auth/login")
+async def login(req: LoginRequest, response: Response):
+    """登录验证"""
+    global _session_token
+    if req.password == settings.app_password:
+        _session_token = secrets.token_hex(32)
+        response.set_cookie(
+            key="session",
+            value=_session_token,
+            httponly=True,
+            max_age=86400 * 30,  # 30天
+            samesite="lax",
+        )
+        return LoginResponse(success=True, message="登录成功")
+    raise HTTPException(status_code=401, detail="密码错误")
+
+
+@router.post("/auth/logout")
+async def logout(response: Response):
+    """退出登录"""
+    global _session_token
+    _session_token = None
+    response.delete_cookie("session")
+    return {"message": "已退出"}
+
+
+@router.get("/auth/check")
+async def check_auth(request: Request):
+    """检查是否已登录"""
+    return {"authenticated": require_auth(request)}
 
 
 class TickTickPasswordAuth(BaseModel):
