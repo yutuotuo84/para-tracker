@@ -1,10 +1,22 @@
 """SQLAlchemy 数据模型"""
 
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, JSON, Boolean
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, JSON, Boolean, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from base import Base
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String(64), unique=True, nullable=False)
+    password_hash = Column(String(128), nullable=False)
+    created_at = Column(DateTime, default=datetime.now)
+
+    def __repr__(self):
+        return f"<User {self.username}>"
 
 
 class Project(Base):
@@ -16,6 +28,7 @@ class Project(Base):
     para_category = Column(String(20), nullable=True)  # 01-Projects/02-Areas/03-Resources/04-Archives
     color = Column(String(20), default="#6366f1")
     is_archived = Column(Boolean, default=False)
+    user_id = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
@@ -38,6 +51,7 @@ class Task(Base):
     completed_at = Column(DateTime, nullable=True)
     tags = Column(JSON, default=list)
     priority = Column(Integer, default=0)  # 0=none, 1=low, 3=medium, 5=high
+    user_id = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
@@ -66,6 +80,7 @@ class Memo(Base):
     tags = Column(JSON, default=list)
     task_id = Column(Integer, ForeignKey("tasks.id"), nullable=True)
     source = Column(String(20), default="free_write")  # task_completion / free_write
+    user_id = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
@@ -75,13 +90,17 @@ class Memo(Base):
 
 class ParaTag(Base):
     __tablename__ = "para_tags"
+    __table_args__ = (  # 允许不同用户有相同路径的标签
+        UniqueConstraint("full_path", "user_id", name="uq_para_tag_per_user"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    full_path = Column(String(255), unique=True, nullable=False)  # e.g. "01-Projects/网站开发"
+    full_path = Column(String(255), nullable=False)  # e.g. "01-Projects/网站开发"
     category = Column(String(20), nullable=False)  # 01-Projects/02-Areas/03-Resources/04-Archives
     label = Column(String(100), nullable=False)
     parent_id = Column(Integer, ForeignKey("para_tags.id"), nullable=True)
     sort_order = Column(Integer, default=0)
+    user_id = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.now)
 
     children = relationship("ParaTag", backref="parent", remote_side=[id], cascade="all")
@@ -99,6 +118,7 @@ class DailySummary(Base):
     memos = Column(JSON, default=list)
     summary_text = Column(Text, nullable=True)
     suggestions = Column(JSON, default=list)
+    user_id = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 

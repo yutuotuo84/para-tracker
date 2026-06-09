@@ -26,14 +26,13 @@
             font-size: 1.5rem;
             margin-bottom: 0.5rem;
         }
-        .login-card p {
+        .login-card .subtitle {
             color: var(--text-secondary);
             margin-bottom: 2rem;
             font-size: 0.9rem;
         }
         .login-card input {
             margin-bottom: 1rem;
-            text-align: center;
             font-size: 1rem;
         }
         .login-card .error {
@@ -42,50 +41,105 @@
             margin-bottom: 0.75rem;
             min-height: 1.5rem;
         }
+        .login-card .switch-link {
+            margin-top: 1.5rem;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+        .login-card .switch-link a {
+            color: var(--para-p);
+            cursor: pointer;
+            text-decoration: none;
+        }
+        .login-card .switch-link a:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 <body>
 <div class="login-page">
     <div class="login-card">
         <h1>📋 PARA Tracker</h1>
-        <p>请输入密码以继续</p>
+        <p class="subtitle" id="subtitle">登录到你的账户</p>
         <div class="error" id="error"></div>
-        <input type="password" id="password" placeholder="输入密码"
-               @keydown.enter="handleLogin()">
-        <button class="btn btn-primary" id="loginBtn" style="width:100%;" onclick="handleLogin()">
+
+        <input type="text" id="username" placeholder="用户名" autocomplete="username">
+        <input type="password" id="password" placeholder="密码" autocomplete="current-password">
+
+        <button class="btn btn-primary" id="submitBtn" style="width:100%;" onclick="handleSubmit()">
             登录
         </button>
+
+        <div class="switch-link">
+            <span id="switchText">还没有账号？</span>
+            <a id="switchLink" onclick="toggleMode()">注册</a>
+        </div>
     </div>
 </div>
 <script>
-    async function handleLogin() {
-        const pw = document.getElementById('password').value;
-        const btn = document.getElementById('loginBtn');
+    let isRegister = false;
+
+    function toggleMode() {
+        isRegister = !isRegister;
+        document.getElementById('subtitle').textContent = isRegister ? '创建新账户' : '登录到你的账户';
+        document.getElementById('submitBtn').textContent = isRegister ? '注册' : '登录';
+        document.getElementById('switchText').textContent = isRegister ? '已有账号？' : '还没有账号？';
+        document.getElementById('switchLink').textContent = isRegister ? '登录' : '注册';
+        document.getElementById('error').textContent = '';
+    }
+
+    async function handleSubmit() {
+        const username = document.getElementById('username').value.trim();
+        const password = document.getElementById('password').value;
+        const btn = document.getElementById('submitBtn');
         const err = document.getElementById('error');
-        if (!pw.trim()) { err.textContent = '请输入密码'; return; }
+
+        if (!username) { err.textContent = '请输入用户名'; return; }
+        if (!password) { err.textContent = '请输入密码'; return; }
+
         btn.disabled = true;
-        btn.textContent = '登录中...';
+        btn.textContent = '处理中...';
+
         try {
-            const resp = await fetch('/api/auth/login', {
+            const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
+            const resp = await fetch(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ password: pw }),
+                body: JSON.stringify({ username, password }),
             });
+
             if (resp.ok) {
-                window.location.href = '/';
+                if (isRegister) {
+                    // 注册成功后自动切换到登录模式并填入用户名
+                    isRegister = false;
+                    toggleMode();
+                    document.getElementById('password').value = '';
+                    err.textContent = '';
+                    err.style.color = '#10b981';
+                    err.textContent = '注册成功，请登录';
+                    document.getElementById('password').focus();
+                } else {
+                    window.location.href = '/';
+                }
             } else {
                 const data = await resp.json();
-                err.textContent = data.detail || '密码错误';
+                err.style.color = '#ef4444';
+                err.textContent = data.detail || '操作失败';
             }
         } catch (e) {
+            err.style.color = '#ef4444';
             err.textContent = '请求失败: ' + e.message;
         } finally {
             btn.disabled = false;
-            btn.textContent = '登录';
+            btn.textContent = isRegister ? '注册' : '登录';
         }
     }
+
     document.getElementById('password').addEventListener('keydown', function(e) {
-        if (e.key === 'Enter') handleLogin();
+        if (e.key === 'Enter') handleSubmit();
+    });
+    document.getElementById('username').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') document.getElementById('password').focus();
     });
 </script>
 </body>

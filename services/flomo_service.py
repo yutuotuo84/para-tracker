@@ -56,7 +56,8 @@ class FlomoClient:
 
     async def sync_memo_to_db(self, db: AsyncSession, content: str,
                                tags: list[str], source: str = "free_write",
-                               task_id: int | None = None) -> Memo:
+                               task_id: int | None = None,
+                               user_id: int = 1) -> Memo:
         """创建笔记并保存到本地数据库"""
         flomo_id = await self.create_memo(content, tags)
 
@@ -66,6 +67,7 @@ class FlomoClient:
             tags=tags or [],
             task_id=task_id,
             source=source,
+            user_id=user_id,
         )
         db.add(memo)
         await db.commit()

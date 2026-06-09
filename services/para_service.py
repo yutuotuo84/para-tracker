@@ -15,30 +15,30 @@ INITIAL_CATEGORIES = [
 ]
 
 
-async def seed_para_tags(db: AsyncSession):
-    """初始化 PARA 四大分类标签，先清理旧版单字母分类"""
-    # 迁移：清理旧版 P/A/R/ARCH 分类
-    for old_cat in ["P", "A", "R", "ARCH"]:
-        await db.execute(delete(ParaTag).where(ParaTag.category == old_cat))
-    await db.commit()
-
+async def seed_para_tags(db: AsyncSession, user_id: int = 1):
+    """初始化 PARA 四大分类标签"""
     for cat, label, _, order in INITIAL_CATEGORIES:
-        exists = await db.execute(select(ParaTag).where(ParaTag.category == cat))
+        exists = await db.execute(
+            select(ParaTag).where(ParaTag.category == cat, ParaTag.user_id == user_id)
+        )
         if not exists.scalars().first():
             tag = ParaTag(
                 full_path=f"{cat}/",
                 category=cat,
                 label=label,
                 sort_order=order,
+                user_id=user_id,
             )
             db.add(tag)
     await db.commit()
 
 
-async def get_tag_tree(db: AsyncSession) -> list[dict]:
+async def get_tag_tree(db: AsyncSession, user_id: int = 1) -> list[dict]:
     """获取完整的 PARA 标签树"""
     result = await db.execute(
-        select(ParaTag).order_by(ParaTag.sort_order, ParaTag.label)
+        select(ParaTag)
+        .where(ParaTag.user_id == user_id)
+        .order_by(ParaTag.sort_order, ParaTag.label)
     )
     tags = result.scalars().all()
 
@@ -65,7 +65,8 @@ async def get_tag_tree(db: AsyncSession) -> list[dict]:
     return root
 
 
-async def create_tag(db: AsyncSession, full_path: str, label: str | None = None) -> ParaTag:
+async def create_tag(db: AsyncSession, full_path: str, label: str | None = None,
+                     user_id: int = 1) -> ParaTag:
     """创建新的 PARA 标签"""
     category = full_path.split("/")[0] if "/" in full_path else full_path
     tag_label = label or full_path.split("/")[-1]
@@ -75,10 +76,14 @@ async def create_tag(db: AsyncSession, full_path: str, label: str | None = None)
     parent = None
     if parent_path:
         # 先试不带斜杠，再试带斜杠
-        result = await db.execute(select(ParaTag).where(ParaTag.full_path == parent_path))
+        result = await db.execute(
+            select(ParaTag).where(ParaTag.full_path == parent_path, ParaTag.user_id == user_id)
+        )
         parent = result.scalar_one_or_none()
         if not parent:
-            result = await db.execute(select(ParaTag).where(ParaTag.full_path == f"{parent_path}/"))
+            result = await db.execute(
+                select(ParaTag).where(ParaTag.full_path == f"{parent_path}/", ParaTag.user_id == user_id)
+            )
             parent = result.scalar_one_or_none()
 
     tag = ParaTag(
@@ -86,6 +91,7 @@ async def create_tag(db: AsyncSession, full_path: str, label: str | None = None)
         category=category,
         label=tag_label,
         parent_id=parent.id if parent else None,
+        user_id=user_id,
     )
     db.add(tag)
     await db.commit()
@@ -118,9 +124,12 @@ async def delete_tag(db: AsyncSession, tag_id: int):
     await db.commit()
 
 
-async def search_tags(db: AsyncSession, query: str) -> list[ParaTag]:
+async def search_tags(db: AsyncSession, query: str, user_id: int = 1) -> list[ParaTag]:
     """搜索标签"""
     result = await db.execute(
-        select(ParaTag).where(ParaTag.full_path.ilike(f"%{query}%"))
+        select(ParaTag).where(
+            ParaTag.user_id == user_id,
+            ParaTag.full_path.ilike(f"%{query}%"),
+        )
     )
     return result.scalars().all()

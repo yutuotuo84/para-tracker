@@ -5,11 +5,12 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
-from fastapi.responses import RedirectResponse, FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import select, update
 
 from config import settings
-from database import init_db
+from database import init_db, async_session_factory
 from services.para_service import seed_para_tags
 
 # 配置日志
@@ -22,7 +23,6 @@ logger = logging.getLogger(__name__)
 
 async def sync_loop():
     """后台定时同步任务"""
-    from database import async_session_factory
     from services.ticktick_service import ticktick_client
 
     while True:
@@ -44,10 +44,19 @@ async def lifespan(app: FastAPI):
     logger.info("正在初始化数据库...")
     await init_db()
 
-    # 初始化 PARA 种子标签
-    from database import async_session_factory
+    # 数据迁移：将旧数据（user_id IS NULL）归给第一个用户（id=1）
+    from models import Task, Memo, ParaTag, Project, DailySummary
+
     async with async_session_factory() as db:
-        await seed_para_tags(db)
+        for model in [Task, Memo, ParaTag, Project, DailySummary]:
+            await db.execute(
+                update(model).where(model.user_id.is_(None)).values(user_id=1)
+            )
+        await db.commit()
+
+    # 初始化 PARA 种子标签（给 user_id=1）
+    async with async_session_factory() as db:
+        await seed_para_tags(db, user_id=1)
 
     # 启动后台同步
     task = asyncio.create_task(sync_loop())
@@ -74,24 +83,22 @@ app = FastAPI(
 # ─── 登录验证中间件 ───
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
-    from routers.auth import require_auth
+    from routers.auth import _session_store
 
-    if settings.app_password:
-        # 不需要验证的路径
-        public_paths = {"/login", "/api/auth/login", "/api/auth/check", "/static"}
-        if not any(request.url.path.startswith(p) for p in public_paths):
-            if not require_auth(request):
-                if request.url.path.startswith("/api/"):
-                    from fastapi.responses import JSONResponse
-                    return JSONResponse(status_code=401, content={"detail": "未登录"})
-                return RedirectResponse(url="/login")
+    # 公开路径（无需登录）
+    public_paths = {"/login", "/api/auth/register", "/api/auth/login", "/api/auth/check", "/static"}
+    if any(request.url.path.startswith(p) for p in public_paths):
+        return await call_next(request)
+
+    # 检查登录状态
+    token = request.cookies.get("session")
+    if not token or token not in _session_store:
+        if request.url.path.startswith("/api/"):
+            from fastapi.responses import JSONResponse
+            return JSONResponse(status_code=401, content={"detail": "未登录"})
+        return RedirectResponse(url="/login")
+
     return await call_next(request)
-
-
-@app.get("/login")
-async def login_page():
-    """返回登录页面"""
-    return FileResponse("static/login.html")
 
 # 注册路由
 from routers import auth, tasks, memos, para, summary
@@ -109,6 +116,12 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 async def root():
     """返回主页面"""
     return FileResponse("static/index.html")
+
+
+@app.get("/login")
+async def login_page():
+    """返回登录页面"""
+    return FileResponse("static/login.html")
 
 
 if __name__ == "__main__":

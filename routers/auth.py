@@ -1,12 +1,17 @@
 """认证和同步相关 API 路由"""
 
+import hashlib
 import secrets
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
-from database import get_session
+from database import get_session, async_session_factory
+from models import User
 from services.ticktick_service import ticktick_client, TICKTICK_OAUTH_AUTH
 from services.flomo_service import flomo_client
 from services.summary_service import summary_service
@@ -14,49 +19,80 @@ from services.para_service import seed_para_tags
 
 router = APIRouter(prefix="/api", tags=["auth"])
 
-# 简单的内存 session 存储（单用户足够）
-_session_token: str | None = None
+# 内存 session 存储 {token: user_id}
+_session_store: dict[str, int] = {}
 
 
-def require_auth(request: Request):
-    """验证请求是否已登录（被 middleware 调用）"""
-    if not settings.app_password:
-        return True  # 未设置密码，不验证
-    token = request.cookies.get("session")
-    return token == _session_token
+def _hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
 
 
-class LoginRequest(BaseModel):
+class RegisterRequest(BaseModel):
+    username: str
     password: str
 
 
-class LoginResponse(BaseModel):
-    success: bool
-    message: str = ""
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+@router.post("/auth/register")
+async def register(req: RegisterRequest, db: AsyncSession = Depends(get_session)):
+    """注册新用户"""
+    if not req.username.strip() or len(req.username.strip()) < 2:
+        raise HTTPException(status_code=400, detail="用户名至少 2 个字符")
+    if len(req.password) < 4:
+        raise HTTPException(status_code=400, detail="密码至少 4 个字符")
+
+    # 检查重名
+    result = await db.execute(select(User).where(User.username == req.username.strip()))
+    if result.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="用户名已存在")
+
+    user = User(
+        username=req.username.strip(),
+        password_hash=_hash_password(req.password),
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+
+    # 为新用户初始化 PARA 标签
+    await seed_para_tags(db, user_id=user.id)
+
+    return {"message": "注册成功", "user_id": user.id}
 
 
 @router.post("/auth/login")
 async def login(req: LoginRequest, response: Response):
     """登录验证"""
-    global _session_token
-    if req.password == settings.app_password:
-        _session_token = secrets.token_hex(32)
-        response.set_cookie(
-            key="session",
-            value=_session_token,
-            httponly=True,
-            max_age=86400 * 30,  # 30天
-            samesite="lax",
-        )
-        return LoginResponse(success=True, message="登录成功")
-    raise HTTPException(status_code=401, detail="密码错误")
+    async with async_session_factory() as db:
+        result = await db.execute(select(User).where(User.username == req.username.strip()))
+        user = result.scalar_one_or_none()
+
+    if not user or user.password_hash != _hash_password(req.password):
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+    token = secrets.token_hex(32)
+    _session_store[token] = user.id
+
+    response.set_cookie(
+        key="session",
+        value=token,
+        httponly=True,
+        max_age=86400 * 30,  # 30天
+        samesite="lax",
+    )
+    return {"message": "登录成功", "user_id": user.id}
 
 
 @router.post("/auth/logout")
-async def logout(response: Response):
+async def logout(request: Request, response: Response):
     """退出登录"""
-    global _session_token
-    _session_token = None
+    token = request.cookies.get("session")
+    if token and token in _session_store:
+        del _session_store[token]
     response.delete_cookie("session")
     return {"message": "已退出"}
 
@@ -64,8 +100,26 @@ async def logout(response: Response):
 @router.get("/auth/check")
 async def check_auth(request: Request):
     """检查是否已登录"""
-    return {"authenticated": require_auth(request)}
+    token = request.cookies.get("session")
+    if token and token in _session_store:
+        return {"authenticated": True}
+    return {"authenticated": False}
 
+
+async def get_current_user(request: Request, db: AsyncSession = Depends(get_session)) -> User:
+    """获取当前登录用户（FastAPI 依赖注入）"""
+    token = request.cookies.get("session")
+    if not token or token not in _session_store:
+        raise HTTPException(status_code=401, detail="未登录")
+    user_id = _session_store[token]
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=401, detail="用户不存在")
+    return user
+
+
+# ─── TickTick / Flomo / AI / Sync 端点（保持不变） ───
 
 class TickTickPasswordAuth(BaseModel):
     username: str

@@ -8,7 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_session
-from models import Memo, Task, Project
+from models import Memo, Task, Project, User
+from routers.auth import get_current_user
 from services.flomo_service import flomo_client
 
 router = APIRouter(prefix="/api/memos", tags=["memos"])
@@ -32,11 +33,12 @@ async def list_memos(
     source: Optional[str] = None,
     limit: int = 50,
     db: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
     """获取笔记列表"""
-    query = select(Memo).order_by(Memo.created_at.desc()).limit(limit)
+    query = select(Memo).where(Memo.user_id == user.id).order_by(Memo.created_at.desc()).limit(limit)
     if source:
-        query = select(Memo).where(Memo.source == source).order_by(Memo.created_at.desc()).limit(limit)
+        query = select(Memo).where(Memo.user_id == user.id, Memo.source == source).order_by(Memo.created_at.desc()).limit(limit)
 
     result = await db.execute(query)
     memos = result.scalars().all()
@@ -58,6 +60,7 @@ async def list_memos(
 async def create_memo(
     req: CreateMemoRequest,
     db: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
     """创建自由笔记"""
     memo = await flomo_client.sync_memo_to_db(
@@ -66,6 +69,7 @@ async def create_memo(
         tags=req.tags,
         source=req.source,
         task_id=req.task_id,
+        user_id=user.id,
     )
 
     return {
@@ -81,6 +85,7 @@ async def create_memo(
 async def create_task_memo(
     req: CreateTaskMemoRequest,
     db: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
     """为完成任务创建感想笔记"""
     # 验证任务存在
@@ -107,6 +112,7 @@ async def create_task_memo(
         tags=all_tags,
         source="task_completion",
         task_id=req.task_id,
+        user_id=user.id,
     )
 
     return {
@@ -129,9 +135,10 @@ async def update_memo(
     memo_id: int,
     req: UpdateMemoRequest,
     db: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
     """修改笔记内容"""
-    result = await db.execute(select(Memo).where(Memo.id == memo_id))
+    result = await db.execute(select(Memo).where(Memo.id == memo_id, Memo.user_id == user.id))
     memo = result.scalar_one_or_none()
     if not memo:
         raise HTTPException(status_code=404, detail="笔记不存在")
@@ -152,9 +159,11 @@ async def update_memo(
 
 
 @router.delete("/{memo_id}")
-async def delete_memo(memo_id: int, db: AsyncSession = Depends(get_session)):
+async def delete_memo(memo_id: int,
+                      db: AsyncSession = Depends(get_session),
+                      user: User = Depends(get_current_user)):
     """删除笔记"""
-    result = await db.execute(select(Memo).where(Memo.id == memo_id))
+    result = await db.execute(select(Memo).where(Memo.id == memo_id, Memo.user_id == user.id))
     memo = result.scalar_one_or_none()
     if not memo:
         raise HTTPException(status_code=404, detail="笔记不存在")

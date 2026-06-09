@@ -7,18 +7,20 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_session
-from models import DailySummary
+from models import DailySummary, User
+from routers.auth import get_current_user
 from services.summary_service import summary_service
 
 router = APIRouter(prefix="/api/summary", tags=["summary"])
 
 
 @router.get("/today")
-async def get_today_summary(db: AsyncSession = Depends(get_session)):
+async def get_today_summary(db: AsyncSession = Depends(get_session),
+                            user: User = Depends(get_current_user)):
     """获取今日总结（如果已生成）"""
     today = date.today().isoformat()
     result = await db.execute(
-        select(DailySummary).where(DailySummary.date == today)
+        select(DailySummary).where(DailySummary.date == today, DailySummary.user_id == user.id)
     )
     summary = result.scalar_one_or_none()
 
@@ -44,7 +46,8 @@ async def get_today_summary(db: AsyncSession = Depends(get_session)):
 
 
 @router.post("/generate")
-async def generate_summary(db: AsyncSession = Depends(get_session)):
+async def generate_summary(db: AsyncSession = Depends(get_session),
+                           user: User = Depends(get_current_user)):
     """触发今日总结生成"""
     data = await summary_service.get_today_data(db)
 
@@ -70,10 +73,12 @@ async def generate_summary(db: AsyncSession = Depends(get_session)):
 
 
 @router.get("/history")
-async def get_summary_history(limit: int = 7, db: AsyncSession = Depends(get_session)):
+async def get_summary_history(limit: int = 7,
+                              db: AsyncSession = Depends(get_session),
+                              user: User = Depends(get_current_user)):
     """获取历史总结"""
     result = await db.execute(
-        select(DailySummary).order_by(DailySummary.date.desc()).limit(limit)
+        select(DailySummary).where(DailySummary.user_id == user.id).order_by(DailySummary.date.desc()).limit(limit)
     )
     summaries = result.scalars().all()
 

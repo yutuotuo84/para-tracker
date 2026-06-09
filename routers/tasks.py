@@ -5,11 +5,12 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, update, delete, func, desc
+from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_session
-from models import Task, Project, Memo
+from models import Task, Project, Memo, User
+from routers.auth import get_current_user
 from services.ticktick_service import ticktick_client
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
@@ -33,9 +34,11 @@ class UpdateTaskRequest(BaseModel):
 
 
 @router.put("/{task_id}")
-async def update_task(task_id: int, req: UpdateTaskRequest, db: AsyncSession = Depends(get_session)):
+async def update_task(task_id: int, req: UpdateTaskRequest,
+                      db: AsyncSession = Depends(get_session),
+                      user: User = Depends(get_current_user)):
     """编辑任务"""
-    result = await db.execute(select(Task).where(Task.id == task_id))
+    result = await db.execute(select(Task).where(Task.id == task_id, Task.user_id == user.id))
     task = result.scalar_one_or_none()
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
@@ -77,7 +80,9 @@ async def update_task(task_id: int, req: UpdateTaskRequest, db: AsyncSession = D
 
 
 @router.post("")
-async def create_task(req: CreateTaskRequest, db: AsyncSession = Depends(get_session)):
+async def create_task(req: CreateTaskRequest,
+                      db: AsyncSession = Depends(get_session),
+                      user: User = Depends(get_current_user)):
     """创建新任务"""
     if not req.title.strip():
         raise HTTPException(status_code=400, detail="任务标题不能为空")
@@ -97,6 +102,7 @@ async def create_task(req: CreateTaskRequest, db: AsyncSession = Depends(get_ses
         tags=req.tags,
         project_id=req.project_id,
         status="todo",
+        user_id=user.id,
     )
     db.add(task)
     await db.commit()
@@ -127,9 +133,10 @@ async def list_tasks(
     status: Optional[str] = None,
     project_id: Optional[int] = None,
     db: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
     """获取任务列表"""
-    query = select(Task)
+    query = select(Task).where(Task.user_id == user.id)
     if status:
         query = query.where(Task.status == status)
     if project_id:
@@ -159,17 +166,20 @@ async def list_tasks(
 
 
 @router.get("/recent-tags")
-async def recent_tags(db: AsyncSession = Depends(get_session)):
+async def recent_tags(db: AsyncSession = Depends(get_session),
+                      user: User = Depends(get_current_user)):
     """获取最近使用的标签（从任务和笔记中收集）"""
     # 从任务的 tags 中收集最近 20 条有标签的记录
     task_result = await db.execute(
         select(Task.tags).where(
+            Task.user_id == user.id,
             Task.tags.isnot(None), Task.tags != "[]"
         ).order_by(Task.created_at.desc()).limit(20)
     )
     # 从笔记的 tags 中收集
     memo_result = await db.execute(
         select(Memo.tags).where(
+            Memo.user_id == user.id,
             Memo.tags.isnot(None), Memo.tags != "[]"
         ).order_by(Memo.created_at.desc()).limit(20)
     )
@@ -191,9 +201,11 @@ async def recent_tags(db: AsyncSession = Depends(get_session)):
 
 
 @router.post("/{task_id}/toggle")
-async def toggle_task(task_id: int, db: AsyncSession = Depends(get_session)):
+async def toggle_task(task_id: int,
+                      db: AsyncSession = Depends(get_session),
+                      user: User = Depends(get_current_user)):
     """切换任务完成/未完成状态"""
-    result = await db.execute(select(Task).where(Task.id == task_id))
+    result = await db.execute(select(Task).where(Task.id == task_id, Task.user_id == user.id))
     task = result.scalar_one_or_none()
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
@@ -236,10 +248,13 @@ async def toggle_task(task_id: int, db: AsyncSession = Depends(get_session)):
             "suggested_tags": para_tags + (task.tags or []),
         }
 
+
 @router.delete("/{task_id}")
-async def delete_task(task_id: int, db: AsyncSession = Depends(get_session)):
+async def delete_task(task_id: int,
+                      db: AsyncSession = Depends(get_session),
+                      user: User = Depends(get_current_user)):
     """删除任务"""
-    result = await db.execute(select(Task).where(Task.id == task_id))
+    result = await db.execute(select(Task).where(Task.id == task_id, Task.user_id == user.id))
     task = result.scalar_one_or_none()
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
@@ -255,9 +270,10 @@ async def delete_task(task_id: int, db: AsyncSession = Depends(get_session)):
 async def recently_completed(
     since: Optional[str] = None,
     db: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
     """获取最近完成的任务"""
-    query = select(Task).where(Task.status == "done").order_by(Task.completed_at.desc()).limit(20)
+    query = select(Task).where(Task.status == "done", Task.user_id == user.id).order_by(Task.completed_at.desc()).limit(20)
     result = await db.execute(query)
     tasks = result.scalars().all()
 
