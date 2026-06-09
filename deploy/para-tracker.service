@@ -1,0 +1,15 @@
+[Unit]
+Description=PARA Tracker
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/para-tracker
+EnvironmentFile=/opt/para-tracker/.env
+ExecStart=/opt/para-tracker/venv/bin/python main.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

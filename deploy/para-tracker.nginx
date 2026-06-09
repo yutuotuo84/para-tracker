@@ -1,0 +1,27 @@
+server {
+    listen 80;
+    server_name your-domain.com;
+
+    # 可选: 后面配置 HTTPS 后改为 443 + SSL
+    # listen 443 ssl;
+    # ssl_certificate /etc/letsencrypt/live/your-domain.com/fullchain.pem;
+    # ssl_certificate_key /etc/letsencrypt/live/your-domain.com/privkey.pem;
+
+    # 请求体限制（用于笔记内容）
+    client_max_body_size 10m;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # 静态文件缓存
+    location /static/ {
+        proxy_pass http://127.0.0.1:8000;
+        expires 7d;
+        add_header Cache-Control "public, immutable";
+    }
+}

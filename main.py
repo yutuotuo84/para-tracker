@@ -90,4 +90,9 @@ async def root():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="127.0.0.1", port=settings.app_port, reload=True)
+    uvicorn.run(
+        "main:app",
+        host="127.0.0.1",       # 监听本地，由 nginx 反向代理
+        port=settings.app_port,
+        reload=False,            # 生产模式必须关闭
+    )
